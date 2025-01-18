@@ -33,14 +33,18 @@ arrow::Status createSchema(std::shared_ptr<arrow::Schema> & schema) {
     return arrow::Status::OK();
 }
 
+void appendSingleUnitData(std::vector<float> &arr) {
+    arr.push_back(3.1415f);
+}
+
 arrow::Status buildCol(std::shared_ptr<arrow::Array> &col, int64_t length) {
 
-    // float arr[1000];
-    // for (int i = 0; i < 1000; ++i) {
-    //     arr[i] = 3.1415f;
-    // }
+    std::vector<float> arr;
 
-    std::vector<float> arr(length, 3.1415f);
+    for (int i = 0; i < length; ++i) {
+        appendSingleUnitData(arr);
+    }
+
     arrow::FloatBuilder floatbuilder(arrow::float32(), arrow::default_memory_pool());
     ARROW_RETURN_NOT_OK(floatbuilder.Reserve(length));
 
@@ -50,26 +54,27 @@ arrow::Status buildCol(std::shared_ptr<arrow::Array> &col, int64_t length) {
 }
 
 arrow::Status buildData(std::vector<std::shared_ptr<arrow::Array>> & columns, int64_t length) {
-    // Create vector of 10 arrays
-    // Build columns in loop
-    int num_threads = std::thread::hardware_concurrency();
-    ARROW_ASSIGN_OR_RAISE(auto pool, arrow::internal::ThreadPool::Make(num_threads));
+    
+    std::vector<std::thread> threads;
+    std::vector<arrow::Status> statuses(columns.size());
+    threads.reserve(columns.size());
 
-    std::vector<arrow::Future<arrow::Status>> futures;
-    futures.reserve(columns.size());
-
-    for (size_t i = 0; i < columns.size(); ++i) {
-        futures.emplace_back(pool->Submit([&columns, i, length]() -> arrow::Status {
-            return buildCol(columns[i], length);
-        }));
+    for (size_t i = 0; i < columns.size(); i++) {
+        threads.emplace_back([&columns, &statuses, i, length]() {
+            statuses[i] = buildCol(columns[i], length);
+        });
     }
 
-    // for (auto& col : columns) {
-    //     ARROW_RETURN_NOT_OK(buildCol(col, length));
-    // }
-    // for (int i = 0; i < futures.size(); ++i) {
-    //     ARROW_RETURN_NOT_OK(futures[i].get());
-    // }
+    for (auto& thread:threads) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+
+    for (const auto& status: statuses) {
+        ARROW_RETURN_NOT_OK(status);
+    }
+
     return arrow::Status::OK();
 }
 
@@ -79,30 +84,42 @@ std::vector<std::shared_ptr<arrow::Array>> &columns)
    std::shared_ptr<arrow::Table> table = arrow::Table::Make(schema, columns);
 
     auto write_options = arrow::ipc::IpcWriteOptions::Defaults();
-    // write_options.compression = arrow::Compression::ZSTD;
     write_options.use_threads = true;
+    // write_options.memory_pool = arrow::default_memory_pool();
 
-    std::shared_ptr<arrow::io::MemoryMappedFile> outfile;
-    ARROW_ASSIGN_OR_RAISE(outfile, arrow::io::MemoryMappedFile::Create("test_out.arrow", table->num_rows() * table->num_columns() * sizeof(float)));
+
+    ARROW_ASSIGN_OR_RAISE(auto outfile,
+        arrow::io::FileOutputStream::Open("test_out.arrow"));
+
+    ARROW_ASSIGN_OR_RAISE(auto buffered_outfile,
+        arrow::io::BufferedOutputStream::Create(
+            64 * 1024,
+            arrow::default_memory_pool(),
+            outfile
+        )
+    );
 
     ARROW_ASSIGN_OR_RAISE(auto ipc_writer,
         arrow::ipc::MakeFileWriter(outfile, schema, write_options));
-
     ARROW_RETURN_NOT_OK(ipc_writer->WriteTable(*table));
     ARROW_RETURN_NOT_OK(ipc_writer->Close());
 
+
     return arrow::Status::OK();
 }
+
+
 
 arrow::Status RunMain() {
     std::shared_ptr<arrow::Schema> schema;
     std::vector<std::shared_ptr<arrow::Array>> columns(10);
 
-    int64_t length = 1000;
+    int64_t length = 1000000;
 
     ARROW_RETURN_NOT_OK(createSchema(schema));
     ARROW_RETURN_NOT_OK(buildData(columns, length));
     ARROW_RETURN_NOT_OK(writeData(schema, columns));
+
 
     return arrow::Status::OK();
 }

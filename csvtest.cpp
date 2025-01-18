@@ -8,7 +8,7 @@ void writeCSV() {
     outFile << std::fixed << std::setprecision(4);  // Set precision for pi
 
     // Write 1000 rows
-    for (int row = 0; row < 1000; row++) {
+    for (int row = 0; row < 1000000; row++) {
         // Write 10 columns
         for (int col = 0; col < 10; col++) {
             outFile << 3.1415f;
