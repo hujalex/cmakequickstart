@@ -50,7 +50,7 @@ std::shared_ptr<arrow::Array> & years2) {
     return arrow::Status::OK();
 }
 
-void defineSchema(
+std::shared_ptr<arrow::Schema> defineSchema(
 std::shared_ptr<arrow::Array> & days, 
 std::shared_ptr<arrow::Array> & months,
 std::shared_ptr<arrow::Array> & years
@@ -68,15 +68,17 @@ std::shared_ptr<arrow::Array> & years
     //The RecordBatch needs the schema,, length for columns, data
     rbatch = arrow::RecordBatch::Make(schema, days->length(), {days, months, years});
     std::cout << rbatch->ToString();
+    return schema;
 }
 
- buildArrayVector(
+ arrow::Status buildTable(
     std::shared_ptr<arrow::Array> & days,
     std::shared_ptr<arrow::Array> & days2,
     std::shared_ptr<arrow::Array> & months,
     std::shared_ptr<arrow::Array> & months2,
     std::shared_ptr<arrow::Array> & years,
-    std::shared_ptr<arrow::Array> & years2
+    std::shared_ptr<arrow::Array> & years2,
+    std::shared_ptr<arrow::Schema> & schema
 ) {
     arrow::ArrayVector day_vecs{days, days2};
     std::shared_ptr<arrow::ChunkedArray> day_chunks = 
@@ -88,7 +90,12 @@ std::shared_ptr<arrow::Array> & years
 
     arrow::ArrayVector year_vecs{years, years2};
     std::shared_ptr<arrow::ChunkedArray> year_chunks = 
-        std::make_shared<arrow:ChunkedArray>(year_vecs);
+        std::make_shared<arrow::ChunkedArray>(year_vecs);
+    
+    std::shared_ptr<arrow::Table> table;
+    table = arrow::Table::Make(schema, {day_chunks, month_chunks, year_chunks}, 10);
+
+    std::cout << table->ToString();
 
 
     return arrow::Status::OK();
@@ -100,13 +107,12 @@ arrow::Status RunMain() {
     arrow::Int16Builder int16builder;
     std::shared_ptr<arrow::Array> days, months, years;
     std::shared_ptr<arrow::Array> days2, months2, years2;
+    std::shared_ptr<arrow::Schema> schema = defineSchema(days, months, years);
+
 
     ARROW_RETURN_NOT_OK(buildChunkedArray(int8builder, int16builder, days2, months2, years2));
     ARROW_RETURN_NOT_OK(buildArrays(int8builder, int16builder, days, months, years));
-    ARROW_RETURN_NOT_OK(buildArrayVector(days, days2, months, months2, years, years2));
-
-    defineSchema(days, months, years);
-
+    ARROW_RETURN_NOT_OK(buildTable(days, days2, months, months2, years, years2, schema));
 
     return arrow::Status::OK();
 }
